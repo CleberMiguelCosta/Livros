@@ -15,11 +15,7 @@ export async function buscarPrecos(consulta: string): Promise<Oferta[]> {
     throw new Error("A busca de preços não respondeu agora.");
   }
 
-  let html = await baixarBusca(url.toString());
-  if (!paginaDeBusca(html)) html = await baixarBusca(url.toString());
-  if (!paginaDeBusca(html)) {
-    throw new Error("A busca de preços não respondeu agora.");
-  }
+  const html = await baixarPagina(url.toString());
   const ofertas = parseAmazonLivros(html).slice(0, 12);
   if (cache.size > 100) cache.clear();
   cache.set(key, { at: Date.now(), ofertas });
@@ -62,6 +58,26 @@ function paginaDeBusca(html: string) {
   return html.includes("s-search-result") || html.includes("Nenhum resultado");
 }
 
+async function baixarPagina(url: string) {
+  let ultima = "";
+  for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+    if (tentativa > 0) await esperar(900 * tentativa);
+    try {
+      const html = await baixarBusca(url);
+      if (paginaDeBusca(html)) return html;
+      ultima = html;
+    } catch {
+      ultima = "";
+    }
+  }
+  if (paginaDeBusca(ultima)) return ultima;
+  throw new Error("A busca de preços não respondeu agora.");
+}
+
+function esperar(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function baixarBusca(url: string) {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(
@@ -70,7 +86,8 @@ function baixarBusca(url: string) {
         "--silent",
         "--show-error",
         "--max-time",
-        "12",
+        "15",
+        "--compressed",
         "--proto",
         "=https",
         "--output",
