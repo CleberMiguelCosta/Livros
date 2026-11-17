@@ -10,6 +10,7 @@ export async function GET(request: Request) {
     autor: url.searchParams.get("autor") ?? "",
     editora: url.searchParams.get("editora") ?? "",
     q: url.searchParams.get("q") ?? "",
+    status: url.searchParams.get("status") ?? "",
   });
   return json(acervo);
 }

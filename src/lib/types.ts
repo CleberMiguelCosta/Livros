@@ -1,3 +1,5 @@
+export type StatusLeitura = "quero_ler" | "lendo" | "lido" | "";
+
 export type Livro = {
   id: string;
   titulo: string;
@@ -8,6 +10,7 @@ export type Livro = {
   paginas: number | null;
   sinopse: string;
   capaUrl: string;
+  statusLeitura: StatusLeitura;
   createdAt: string;
   updatedAt: string;
 };
@@ -29,7 +32,7 @@ export type Oferta = {
   preco: number;
   url: string;
   imagem: string | null;
-  fonte: "Amazon.com.br";
+  fonte: "Amazon.com.br" | "Mercado Livre";
 };
 
 export type AcervoResponse = {
@@ -38,4 +41,10 @@ export type AcervoResponse = {
   editoras: string[];
   total: number;
   filtrados: number;
+  porStatus?: {
+    quero_ler: number;
+    lendo: number;
+    lido: number;
+    sem_meta: number;
+  };
 };

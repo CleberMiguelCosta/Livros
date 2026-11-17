@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { AcervoResponse } from "@/lib/types";
+import type { AcervoResponse, Livro } from "@/lib/types";
 import { Cover } from "@/components/cover";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { corStatus, labelStatus } from "@/lib/metas";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -20,12 +21,15 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "cn";
 
+type Vista = "grade" | "lista";
+
 export function Acervo() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const autor = searchParams.get("autor") ?? "";
   const editora = searchParams.get("editora") ?? "";
   const q = searchParams.get("q") ?? "";
+  const vista: Vista = searchParams.get("view") === "lista" ? "lista" : "grade";
   const [draft, setDraft] = useState(q);
   const [syncedQuery, setSyncedQuery] = useState(q);
   const [data, setData] = useState<AcervoResponse | null>(null);
@@ -69,12 +73,13 @@ export function Acervo() {
     return () => controller.abort();
   }, [autor, editora, q, reloadKey]);
 
-  function replace(next: { autor?: string; editora?: string; q?: string }) {
-    const values = { autor, editora, q, ...next };
+  function replace(next: { autor?: string; editora?: string; q?: string; view?: Vista }) {
+    const values = { autor, editora, q, view: vista, ...next };
     const params = new URLSearchParams();
     if (values.autor) params.set("autor", values.autor);
     if (values.editora) params.set("editora", values.editora);
     if (values.q) params.set("q", values.q);
+    if (values.view === "lista") params.set("view", "lista");
     const query = params.toString();
     router.replace(query ? `/?${query}` : "/", { scroll: false });
   }
@@ -160,9 +165,43 @@ export function Acervo() {
                   : "Sua biblioteca pessoal."}
             </p>
           </div>
-          <Link href="/livros/novo" className={cn(buttonVariants({ size: "lg" }))}>
-            Cadastrar livro
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="flex rounded-lg bg-card p-1 ring-1 ring-foreground/10"
+              role="group"
+              aria-label="Visualização do acervo"
+            >
+              <button
+                type="button"
+                onClick={() => replace({ view: "grade" })}
+                className={cn(
+                  "h-8 rounded-md px-3 text-sm transition-colors",
+                  vista === "grade"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-foreground hover:bg-accent",
+                )}
+                aria-pressed={vista === "grade"}
+              >
+                Grade
+              </button>
+              <button
+                type="button"
+                onClick={() => replace({ view: "lista" })}
+                className={cn(
+                  "h-8 rounded-md px-3 text-sm transition-colors",
+                  vista === "lista"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-foreground hover:bg-accent",
+                )}
+                aria-pressed={vista === "lista"}
+              >
+                Listar
+              </button>
+            </div>
+            <Link href="/livros/novo" className={cn(buttonVariants({ size: "lg" }))}>
+              Cadastrar livro
+            </Link>
+          </div>
         </div>
 
         {error ? (
@@ -203,43 +242,122 @@ export function Acervo() {
         ) : null}
 
         {data && data.livros.length > 0 ? (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {data.livros.map((livro) => (
-              <li key={livro.id}>
-                <article className="relative flex h-full gap-3 overflow-hidden rounded-2xl bg-card p-3 pl-4 ring-1 ring-foreground/10 before:absolute before:inset-y-0 before:left-0 before:w-1.5 before:bg-primary">
-                  <Cover titulo={livro.titulo} capaUrl={livro.capaUrl} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <h2 className="font-heading text-xl leading-tight">
-                      <Link href={`/livros/${livro.id}`} className="hover:underline">
-                        {livro.titulo}
-                      </Link>
-                    </h2>
-                    <p className="mt-1 text-sm">{livro.autor}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {livro.editora || "Editora não informada"}
-                      {livro.ano ? ` · ${livro.ano}` : ""}
-                    </p>
-                    <div className="mt-auto flex flex-wrap gap-2 pt-3">
-                      <Link
-                        href={`/livros/${livro.id}`}
-                        className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                      >
-                        Ficha
-                      </Link>
-                      <Link
-                        href={`/precos?q=${encodeURIComponent(`${livro.titulo} ${livro.autor}`)}`}
-                        className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
-                      >
-                        Preços
-                      </Link>
-                    </div>
-                  </div>
-                </article>
-              </li>
-            ))}
-          </ul>
+          vista === "lista" ? (
+            <ListaAcervo livros={data.livros} />
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {data.livros.map((livro) => (
+                <li key={livro.id}>
+                  <LivroCard livro={livro} />
+                </li>
+              ))}
+            </ul>
+          )
         ) : null}
       </section>
+    </div>
+  );
+}
+
+function LivroCard({ livro }: { livro: Livro }) {
+  const cor = corStatus(livro.statusLeitura);
+  return (
+    <article className="relative flex h-full gap-3 overflow-hidden rounded-2xl bg-card p-3 pl-4 ring-1 ring-foreground/10 before:absolute before:inset-y-0 before:left-0 before:w-1.5 before:bg-primary">
+      <Cover titulo={livro.titulo} capaUrl={livro.capaUrl} statusLeitura={livro.statusLeitura} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <h2 className="font-heading text-xl leading-tight">
+          <Link href={`/livros/${livro.id}`} className="hover:underline">
+            {livro.titulo}
+          </Link>
+        </h2>
+        <p className="mt-1 text-sm">{livro.autor}</p>
+        <p className="text-sm text-muted-foreground">
+          {livro.editora || "Editora não informada"}
+          {livro.ano ? ` · ${livro.ano}` : ""}
+        </p>
+        {livro.statusLeitura ? (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="h-2 w-2 rounded-full" style={{ background: cor }} aria-hidden />
+            {labelStatus(livro.statusLeitura)}
+          </p>
+        ) : null}
+        <div className="mt-auto flex flex-wrap gap-2 pt-3">
+          <Link
+            href={`/livros/${livro.id}`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          >
+            Ficha
+          </Link>
+          <Link
+            href={`/precos?q=${encodeURIComponent(`${livro.titulo} ${livro.autor}`)}`}
+            className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+          >
+            Preços
+          </Link>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ListaAcervo({ livros }: { livros: Livro[] }) {
+  return (
+    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
+      <div className="hidden grid-cols-[4.5rem_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 border-b border-foreground/10 px-4 py-2 text-xs tracking-[0.14em] text-muted-foreground uppercase sm:grid">
+        <span>Capa</span>
+        <span>Título</span>
+        <span>Autor</span>
+        <span>Editora</span>
+        <span className="text-right">Ações</span>
+      </div>
+      <ul className="divide-y divide-foreground/10">
+        {livros.map((livro) => (
+          <li key={livro.id}>
+            <article className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-3 sm:grid-cols-[4.5rem_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:px-4">
+              <Cover
+                titulo={livro.titulo}
+                capaUrl={livro.capaUrl}
+                statusLeitura={livro.statusLeitura}
+                className="h-16 w-11"
+              />
+              <div className="min-w-0 sm:contents">
+                <div className="min-w-0">
+                  <h2 className="font-heading text-lg leading-tight">
+                    <Link href={`/livros/${livro.id}`} className="hover:underline">
+                      {livro.titulo}
+                    </Link>
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground sm:hidden">
+                    {livro.autor}
+                    {livro.editora ? ` · ${livro.editora}` : ""}
+                    {livro.ano ? ` · ${livro.ano}` : ""}
+                    {livro.statusLeitura ? ` · ${labelStatus(livro.statusLeitura)}` : ""}
+                  </p>
+                </div>
+                <p className="hidden truncate text-sm sm:block">{livro.autor}</p>
+                <p className="hidden truncate text-sm text-muted-foreground sm:block">
+                  {livro.editora || "Editora não informada"}
+                  {livro.ano ? ` · ${livro.ano}` : ""}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 sm:mt-0 sm:justify-end">
+                  <Link
+                    href={`/livros/${livro.id}`}
+                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                  >
+                    Ficha
+                  </Link>
+                  <Link
+                    href={`/precos?q=${encodeURIComponent(`${livro.titulo} ${livro.autor}`)}`}
+                    className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+                  >
+                    Preços
+                  </Link>
+                </div>
+              </div>
+            </article>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

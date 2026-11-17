@@ -9,7 +9,9 @@ import type { Livro } from "@/lib/types";
 import { BookForm } from "@/components/book-form";
 import { Cover } from "@/components/cover";
 import { PriceSearch } from "@/components/price-search";
+import { StatusMetaChips } from "@/components/status-meta-chips";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { labelStatus } from "@/lib/metas";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +33,7 @@ export function BookScreen() {
   const [editing, setEditing] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [open, setOpen] = useState(false);
+  const [addingMeta, setAddingMeta] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -57,6 +60,28 @@ export function BookScreen() {
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "Não foi possível excluir.");
       setRemoving(false);
+    }
+  }
+
+  async function adicionarAMeta() {
+    if (!livro) return;
+    document.getElementById("meta-marcacoes")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (livro.statusLeitura) {
+      toast.message(`Já está em ${labelStatus(livro.statusLeitura)}. Escolha outra marcação abaixo.`);
+      return;
+    }
+    setAddingMeta(true);
+    try {
+      const payload = await api<{ livro: Livro }>(`/api/livros/${livro.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ statusLeitura: "quero_ler" }),
+      });
+      setLivro(payload.livro);
+      toast.success("Adicionado à meta Quero ler.");
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "Não foi possível adicionar à meta.");
+    } finally {
+      setAddingMeta(false);
     }
   }
 
@@ -100,7 +125,12 @@ export function BookScreen() {
   return (
     <div className="grid gap-8">
       <article className="grid gap-6 rounded-2xl bg-card p-4 ring-1 ring-foreground/10 sm:p-6 md:grid-cols-[auto_minmax(0,1fr)]">
-        <Cover titulo={livro.titulo} capaUrl={livro.capaUrl} className="h-52 w-36" />
+        <Cover
+          titulo={livro.titulo}
+          capaUrl={livro.capaUrl}
+          statusLeitura={livro.statusLeitura}
+          className="h-52 w-36"
+        />
         <div>
           <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">Ficha</p>
           <h1 className="mt-1 font-heading text-4xl leading-tight tracking-tight">{livro.titulo}</h1>
@@ -115,6 +145,14 @@ export function BookScreen() {
           <div className="mt-5 flex flex-wrap gap-2">
             <Button type="button" onClick={() => setEditing(true)}>
               Editar
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={adicionarAMeta}
+              disabled={addingMeta}
+            >
+              {addingMeta ? "Adicionando…" : "Adicionar à meta"}
             </Button>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger render={<Button variant="destructive" />}>Excluir</DialogTrigger>
@@ -139,16 +177,17 @@ export function BookScreen() {
               Acervo
             </Link>
           </div>
+          <div id="meta-marcacoes" className="mt-3">
+            <StatusMetaChips
+              livroId={livro.id}
+              statusLeitura={livro.statusLeitura}
+              onChange={(statusLeitura) => setLivro({ ...livro, statusLeitura })}
+            />
+          </div>
         </div>
       </article>
 
       <section className="grid gap-3">
-        <div>
-          <h2 className="font-heading text-3xl">Preços agora</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Busca de {livro.titulo} com {livro.autor} na Amazon.com.br.
-          </p>
-        </div>
         <PriceSearch initialQuery={`${livro.titulo} ${livro.autor}`} auto />
       </section>
     </div>

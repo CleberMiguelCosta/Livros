@@ -1,5 +1,13 @@
 import { acceptsJson, json, requireOwner } from "@/lib/auth";
-import { atualizarLivro, excluirLivro, idValido, obterLivro, parseLivro } from "@/lib/livros";
+import {
+  atualizarLivro,
+  atualizarStatusLeitura,
+  excluirLivro,
+  idValido,
+  obterLivro,
+  parseLivro,
+  parseStatusLeitura,
+} from "@/lib/livros";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -26,6 +34,15 @@ export async function PATCH(request: Request, context: Context) {
   } catch {
     return json({ error: "O cadastro enviado não é um JSON válido." }, 400);
   }
+
+  if (body && typeof body === "object" && "statusLeitura" in body && !("titulo" in body)) {
+    const parsedStatus = parseStatusLeitura(body);
+    if ("error" in parsedStatus) return json({ error: parsedStatus.error }, 400);
+    const livro = await atualizarStatusLeitura(owner.ownerId, id, parsedStatus.value);
+    if (!livro) return json({ error: "Livro não encontrado." }, 404);
+    return json({ livro });
+  }
+
   const parsed = parseLivro(body);
   if ("error" in parsed) return json({ error: parsed.error }, 400);
   const livro = await atualizarLivro(owner.ownerId, id, parsed.value);

@@ -4,9 +4,9 @@ Biblioteca pessoal para cadastrar livros, filtrar por autor e editora, e compara
 
 ## O que dá para fazer
 
-- Cadastrar um livro à mão ou a partir de uma ficha (Open Library; ISBN também consulta a BrasilAPI).
+- Cadastrar um livro à mão ou a partir de uma ficha (Open Library, Google Books, BrasilAPI e ISBNdb).
 - Filtrar o acervo por autor e por editora, e buscar por título ou ISBN.
-- Ver preços atuais de livros na busca pública da Amazon.com.br.
+- Comparar preços no estilo Buscapé (Amazon.com.br e, com token, Mercado Livre).
 - Trazer um conjunto de clássicos brasileiros para experimentar os filtros.
 
 Os dados ficam no seu computador, na pasta `data/`, enquanto você roda o sistema localmente. Na versão publicada, cada pessoa vê só a própria estante.
@@ -22,7 +22,7 @@ npm install
 npm run dev
 ```
 
-Abra [http://localhost:4317](http://localhost:4317).
+Abra [http://localhost:4317](http://localhost:4317) (ou a porta que o `npm run dev` mostrar).
 
 Para uma instalação que já está nessa pasta, entre em `C:\Cleber\Cursor\Livros` e rode `npm install` e `npm run dev`.
 
@@ -30,7 +30,19 @@ Para uma instalação que já está nessa pasta, entre em `C:\Cleber\Cursor\Livr
 
 ## Preços e fichas
 
-- **Ficha do livro:** [Open Library](https://openlibrary.org/developers/api) e, quando a busca é um ISBN, [BrasilAPI](https://brasilapi.com.br/docs#tag/ISBN).
-- **Preços:** busca pública de livros da Amazon.com.br. O Mercado Livre não devolve a pesquisa sem um token de acesso, então os preços mostrados são os anúncios da Amazon.
+- **Ficha do livro:** [Open Library](https://openlibrary.org/developers/api), [Google Books](https://developers.google.com/books/docs/v1/using), e, no ISBN, [BrasilAPI](https://brasilapi.com.br/docs#tag/ISBN). Com chave: [ISBNdb](https://isbndb.com/isbndb-api-documentation-v2).
+- **Preços:** Amazon.com.br. Com token OAuth: [Mercado Livre](https://developers.mercadolivre.com.br/) (`MLB`, categoria Livros).
 
-Nenhuma chave é necessária para essas consultas.
+Copie `.env.example` para `.env.local` se quiser as chaves opcionais:
+
+```bat
+copy .env.example .env.local
+```
+
+| Variável | Para quê |
+| --- | --- |
+| `GOOGLE_BOOKS_API_KEY` | Cota maior na Google Books (a busca funciona sem chave) |
+| `ISBNDB_API_KEY` | Fichas e capas no ISBNdb |
+| `MERCADO_LIVRE_ACCESS_TOKEN` | Anúncios de livros no Mercado Livre |
+
+Sem essas chaves, Open Library, BrasilAPI, Google Books (sem chave) e Amazon continuam funcionando.

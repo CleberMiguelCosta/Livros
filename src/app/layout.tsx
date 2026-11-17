@@ -31,9 +31,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="pt-BR"
       className={`${fraunces.variable} ${figtree.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="flex min-h-full flex-col md:flex-row">
         <ThemeProvider forcedTheme="light" enableSystem={false} attribute="class">
-          <Suspense fallback={<div className="h-32 bg-[oklch(0.29_0.045_35)]" />}>
+          <Suspense fallback={<div className="h-28 w-full bg-[oklch(0.29_0.045_35)] md:h-auto md:w-56" />}>
             <SiteHeader />
           </Suspense>
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">{children}</main>
