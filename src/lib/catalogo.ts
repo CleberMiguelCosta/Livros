@@ -1,3 +1,4 @@
+import https from "node:https";
 import type { Ficha } from "./types";
 
 const USER_AGENT = "EstanteLivros/1.0 (biblioteca pessoal)";
@@ -39,12 +40,12 @@ async function searchOpenLibrary(q: string): Promise<Ficha[]> {
     "fields",
     "title,author_name,publisher,isbn,first_publish_year,cover_i,number_of_pages_median",
   );
-  const response = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": USER_AGENT },
-    signal: AbortSignal.timeout(15000),
+  const response = await http1Json(url, {
+    accept: "application/json",
+    "user-agent": USER_AGENT,
   });
   if (!response.ok) return [];
-  const payload = (await response.json()) as { docs?: unknown[] };
+  const payload = response.body as { docs?: unknown[] };
   if (!Array.isArray(payload.docs)) return [];
   return payload.docs.flatMap((doc) => {
     const ficha = fichaOpenLibrary(doc);
@@ -77,12 +78,12 @@ function fichaOpenLibrary(doc: unknown): Ficha | null {
 }
 
 async function searchBrasilApi(isbn: string): Promise<Ficha | null> {
-  const response = await fetch(`https://brasilapi.com.br/api/isbn/v1/${isbn}`, {
-    headers: { accept: "application/json", "user-agent": USER_AGENT },
-    signal: AbortSignal.timeout(15000),
+  const response = await http1Json(`https://brasilapi.com.br/api/isbn/v1/${isbn}`, {
+    accept: "application/json",
+    "user-agent": USER_AGENT,
   });
   if (!response.ok) return null;
-  const record = (await response.json()) as Record<string, unknown>;
+  const record = response.body as Record<string, unknown>;
   const titulo = readableTitle(text(record.title));
   if (!titulo) return null;
   const autores = strings(record.authors);
@@ -110,12 +111,12 @@ async function searchGoogleBooks(q: string, apiKey: string): Promise<Ficha[]> {
   url.searchParams.set("printType", "books");
   if (apiKey) url.searchParams.set("key", apiKey);
 
-  const response = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": USER_AGENT },
-    signal: AbortSignal.timeout(15000),
+  const response = await http1Json(url, {
+    accept: "application/json",
+    "user-agent": USER_AGENT,
   });
   if (!response.ok) return [];
-  const payload = (await response.json()) as { items?: unknown[] };
+  const payload = response.body as { items?: unknown[] };
   if (!Array.isArray(payload.items)) return [];
   return payload.items.flatMap((item) => {
     const ficha = fichaGoogleBooks(item);
@@ -171,16 +172,13 @@ async function searchIsbnDb(consulta: string, isbn: string | null, apiKey: strin
   const path = isbn
     ? `https://api2.isbndb.com/book/${encodeURIComponent(isbn)}`
     : `https://api2.isbndb.com/books/${encodeURIComponent(consulta.slice(0, 150))}?page=1&pageSize=8`;
-  const response = await fetch(path, {
-    headers: {
-      accept: "application/json",
-      authorization: apiKey,
-      "user-agent": USER_AGENT,
-    },
-    signal: AbortSignal.timeout(15000),
+  const response = await http1Json(path, {
+    accept: "application/json",
+    authorization: apiKey,
+    "user-agent": USER_AGENT,
   });
   if (!response.ok) return [];
-  const payload = (await response.json()) as { book?: unknown; books?: unknown[] };
+  const payload = response.body as { book?: unknown; books?: unknown[] };
   if (payload.book) {
     const ficha = fichaIsbnDb(payload.book);
     return ficha ? [ficha] : [];
@@ -303,6 +301,69 @@ function readableTitle(value: string) {
 
 function env(name: string) {
   return typeof process !== "undefined" ? (process.env[name] ?? "").trim() : "";
+}
+
+/** Open Library corta a conexão quando o Node negocia HTTP/2. HTTP/1.1 responde. */
+function http1Json(url: string | URL, headers: Record<string, string>) {
+  return requestHttp1(url, headers, 0).then((response) => {
+    let body: unknown = null;
+    if (response.text) {
+      try {
+        body = JSON.parse(response.text) as unknown;
+      } catch {
+        body = null;
+      }
+    }
+    return {
+      ok: response.status >= 200 && response.status < 300 && body !== null,
+      body,
+    };
+  });
+}
+
+function requestHttp1(url: string | URL, headers: Record<string, string>, redirects: number) {
+  return new Promise<{ status: number; text: string }>((resolve, reject) => {
+    const req = https.get(
+      url,
+      {
+        headers,
+        timeout: 15000,
+        ALPNProtocols: ["http/1.1"],
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        const location = res.headers.location;
+        if (status >= 300 && status < 400 && location && redirects < 3) {
+          res.resume();
+          const next = new URL(location, url);
+          if (next.protocol !== "https:") {
+            reject(new Error("A ficha catalográfica não respondeu agora."));
+            return;
+          }
+          resolve(requestHttp1(next, headers, redirects + 1));
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > 2_000_000) {
+            req.destroy(new Error("A ficha catalográfica não respondeu agora."));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on("end", () => {
+          resolve({ status, text: Buffer.concat(chunks).toString("utf8") });
+        });
+      },
+    );
+    req.on("timeout", () => {
+      req.destroy(new Error("A ficha catalográfica não respondeu agora."));
+    });
+    req.on("error", reject);
+  });
 }
 
 function text(value: unknown) {
