@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Figtree, Fraunces } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { Suspense } from "react";
-import { SiteHeader } from "@/components/site-header";
+import { SiteShell } from "@/components/site-shell";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -30,13 +30,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="pt-BR"
       className={`${fraunces.variable} ${figtree.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="flex min-h-full flex-col md:flex-row">
+      <body className="min-h-full">
         <ThemeProvider forcedTheme="light" enableSystem={false} attribute="class">
-          <Suspense fallback={<div className="h-28 w-full bg-[oklch(0.29_0.045_35)] md:h-auto md:w-56" />}>
-            <SiteHeader />
+          <Suspense
+            fallback={
+              <div className="flex min-h-svh w-full">
+                <div className="hidden w-64 border-r bg-[oklch(0.29_0.045_35)] md:block" />
+                <div className="flex-1 bg-background" />
+              </div>
+            }
+          >
+            <SiteShell>{children}</SiteShell>
           </Suspense>
-          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">{children}</main>
           <Toaster position="top-center" />
         </ThemeProvider>
       </body>

@@ -11,6 +11,8 @@ const USER_AGENT =
 
 const LIMITE_PAGINA = 12;
 const MAX_PAGINA = 20;
+const CACHE_OK_MS = 10 * 60 * 1000;
+const CACHE_EMPTY_MS = 20 * 1000;
 
 export type PrecosResultado = {
   ofertas: Oferta[];
@@ -23,7 +25,8 @@ export async function buscarPrecos(consulta: string, page = 1): Promise<PrecosRe
   const pagina = Math.min(MAX_PAGINA, Math.max(1, Math.floor(page) || 1));
   const key = `${consulta.toLocaleLowerCase("pt-BR")}::${pagina}`;
   const cached = cache.get(key);
-  if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
+  const cacheTtl = cached && cached.ofertas.length > 0 ? CACHE_OK_MS : CACHE_EMPTY_MS;
+  if (cached && Date.now() - cached.at < cacheTtl) {
     return {
       ofertas: cached.ofertas,
       page: pagina,
@@ -68,55 +71,68 @@ async function buscarAmazon(consulta: string, page: number): Promise<Oferta[]> {
 
 async function buscarMercadoLivre(consulta: string, page: number): Promise<Oferta[]> {
   const token = (process.env.MERCADO_LIVRE_ACCESS_TOKEN ?? "").trim();
-  const url = new URL("https://api.mercadolibre.com/sites/MLB/search");
-  url.searchParams.set("q", consulta);
-  url.searchParams.set("category", "MLB3025"); // Livros
-  url.searchParams.set("limit", String(LIMITE_PAGINA));
-  url.searchParams.set("offset", String((page - 1) * LIMITE_PAGINA));
-
+  const offset = String((page - 1) * LIMITE_PAGINA);
   const headers: Record<string, string> = {
     accept: "application/json",
     "user-agent": USER_AGENT,
+    "accept-language": "pt-BR,pt;q=0.9",
   };
   if (token) headers.authorization = `Bearer ${token}`;
 
-  const response = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!response.ok) return [];
-  const payload = (await response.json()) as { results?: unknown[] };
-  if (!Array.isArray(payload.results)) return [];
+  const tentativas = [
+    { q: consulta, category: "MLB3025" },
+    { q: `livro ${consulta}`, category: "" },
+    { q: consulta, category: "" },
+  ];
 
-  const ofertas: Oferta[] = [];
-  const seen = new Set<string>();
-  for (const item of payload.results) {
-    if (!item || typeof item !== "object") continue;
-    const row = item as Record<string, unknown>;
-    const titulo = typeof row.title === "string" ? row.title.trim() : "";
-    const preco = typeof row.price === "number" ? row.price : Number(row.price);
-    const permalink = typeof row.permalink === "string" ? row.permalink : "";
-    const thumbnail =
-      typeof row.thumbnail === "string"
-        ? row.thumbnail
-        : typeof row.secure_thumbnail === "string"
-          ? row.secure_thumbnail
-          : "";
-    const id = typeof row.id === "string" ? row.id : permalink;
-    if (!titulo || !permalink.startsWith("https://") || !Number.isFinite(preco)) continue;
-    if (preco <= 0 || preco > 20000 || seen.has(id)) continue;
-    seen.add(id);
-    ofertas.push({
-      titulo: titulo.slice(0, 220),
-      preco: Math.round(preco * 100) / 100,
-      url: permalink.slice(0, 500),
-      imagem: thumbnail.startsWith("http")
-        ? thumbnail.replace(/^http:\/\//, "https://").slice(0, 500)
-        : null,
-      fonte: "Mercado Livre",
-    });
+  for (const tentativa of tentativas) {
+    const url = new URL("https://api.mercadolibre.com/sites/MLB/search");
+    url.searchParams.set("q", tentativa.q);
+    if (tentativa.category) url.searchParams.set("category", tentativa.category);
+    url.searchParams.set("limit", String(LIMITE_PAGINA));
+    url.searchParams.set("offset", offset);
+
+    const response = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(15000),
+    }).catch(() => null);
+    if (!response || !response.ok) continue;
+
+    const payload = (await response.json().catch(() => null)) as { results?: unknown[] } | null;
+    if (!payload || !Array.isArray(payload.results) || payload.results.length === 0) continue;
+
+    const ofertas: Oferta[] = [];
+    const seen = new Set<string>();
+    for (const item of payload.results) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const titulo = typeof row.title === "string" ? row.title.trim() : "";
+      const preco = typeof row.price === "number" ? row.price : Number(row.price);
+      const permalink = typeof row.permalink === "string" ? row.permalink : "";
+      const thumbnail =
+        typeof row.thumbnail === "string"
+          ? row.thumbnail
+          : typeof row.secure_thumbnail === "string"
+            ? row.secure_thumbnail
+            : "";
+      const id = typeof row.id === "string" ? row.id : permalink;
+      if (!titulo || !permalink.startsWith("https://") || !Number.isFinite(preco)) continue;
+      if (preco <= 0 || preco > 20000 || seen.has(id)) continue;
+      seen.add(id);
+      ofertas.push({
+        titulo: titulo.slice(0, 220),
+        preco: Math.round(preco * 100) / 100,
+        url: permalink.slice(0, 500),
+        imagem: thumbnail.startsWith("http")
+          ? thumbnail.replace(/^http:\/\//, "https://").slice(0, 500)
+          : null,
+        fonte: "Mercado Livre",
+      });
+    }
+    if (ofertas.length > 0) return ofertas;
   }
-  return ofertas;
+
+  return [];
 }
 
 export function parseAmazonLivros(html: string): Oferta[] {
@@ -126,25 +142,32 @@ export function parseAmazonLivros(html: string): Oferta[] {
 
   for (const block of blocks) {
     const asin =
-      block.match(/\bdata-asin="([A-Z0-9]{10})"/)?.[1] ??
-      block.match(/\/dp\/([A-Z0-9]{10})/)?.[1];
+      block.match(/\bdata-asin="([A-Z0-9]{10})"/i)?.[1]?.toUpperCase() ??
+      block.match(/\/dp\/([A-Z0-9]{10})/i)?.[1]?.toUpperCase();
     const titleMatch =
-      block.match(/<h2[^>]*aria-label="([^"]+)"/) ??
-      block.match(/a-text-normal">([^<]{2,220})<\/span>/) ??
-      block.match(/<span class="a-size-medium a-color-base a-text-normal">([^<]{2,220})<\/span>/);
+      block.match(/<h2[^>]*aria-label="([^"]+)"/i) ??
+      block.match(
+        /<span class="a-size-medium a-color-base a-text-normal">([^<]{2,220})<\/span>/,
+      ) ??
+      block.match(/a-size-base-plus\s+a-color-base\s+a-text-normal">([^<]{2,220})<\/span>/) ??
+      block.match(/a-text-normal">([^<]{2,220})<\/span>/);
     const priceMatch =
-      block.match(/class="a-offscreen">\s*(R\$\s*[0-9.]*,[0-9]{2})/) ??
-      block.match(/aria-label="[^"]*?((?:R\$|R\$\s)[0-9.]*,[0-9]{2})/);
+      block.match(/class="a-offscreen">\s*(R\$\s*[\d.\u00a0\u202f]*\d,\d{2})/) ??
+      block.match(/aria-label="[^"]*?((?:R\$\s*)[\d.\u00a0\u202f]*\d,\d{2})/) ??
+      block.match(/>(R\$\s*[\d.\u00a0\u202f]*\d,\d{2})</);
     const image = block.match(
       /https:\/\/m\.media-amazon\.com\/images\/I\/[A-Za-z0-9%+._-]+/,
     )?.[0];
     if (!asin || !titleMatch || !priceMatch || seen.has(asin)) continue;
 
+    const titulo = limparTitulo(decode(titleMatch[1]));
+    if (!titulo || looksLikeMetaLabel(titulo)) continue;
+
     const preco = parseBRL(priceMatch[1]);
     if (preco === null) continue;
     seen.add(asin);
     ofertas.push({
-      titulo: limparTitulo(decode(titleMatch[1])).slice(0, 220),
+      titulo: titulo.slice(0, 220),
       preco,
       url: `https://www.amazon.com.br/dp/${asin}`,
       imagem: image ?? null,
@@ -155,32 +178,46 @@ export function parseAmazonLivros(html: string): Oferta[] {
   return ofertas.sort((a, b) => a.preco - b.preco);
 }
 
+function looksLikeMetaLabel(value: string) {
+  return /^(edição|edition|paperback|hardcover|kindle|brochura|\d{1,2}\s+\w+\.?\s+\d{4})$/i.test(
+    value.trim(),
+  );
+}
+
 function limparTitulo(value: string) {
   return value.replace(/^Anúncio patrocinado\s*[–—-]\s*/i, "").trim();
 }
 
 function paginaDeBusca(html: string) {
   if (!html || html.length < 500) return false;
-  if (html.includes("s-search-result") || html.includes("Nenhum resultado")) return true;
-  return (html.match(/\/dp\/[A-Z0-9]{10}/g) ?? []).length >= 3;
+  if (html.includes('data-component-type="s-search-result"')) return true;
+  if (/s-no-results-heading|Nenhum resultado/i.test(html)) return true;
+  return (html.match(/\/dp\/[A-Z0-9]{10}/gi) ?? []).length >= 3;
 }
 
 async function baixarPagina(url: string) {
-  let ultima = "";
-  const metodos = [baixarComCurlSessao, baixarComFetch, baixarComCurlSimples];
-  for (let tentativa = 0; tentativa < 4; tentativa += 1) {
-    if (tentativa > 0) await esperar(800 * tentativa);
+  let melhorHtml = "";
+  let melhorOfertas = -1;
+  const metodos = [baixarComCurlSessao, baixarComCurlSimples, baixarComFetch];
+  for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+    if (tentativa > 0) await esperar(900 * tentativa);
     for (const baixar of metodos) {
       try {
         const html = await baixar(url);
-        if (paginaDeBusca(html)) return html;
-        if (html.length > ultima.length) ultima = html;
+        const ofertas = parseAmazonLivros(html).length;
+        if (ofertas > melhorOfertas) {
+          melhorHtml = html;
+          melhorOfertas = ofertas;
+        }
+        // Aceita página com ofertas reais; evita soft-block que só cita a classe no JS.
+        if (ofertas > 0) return html;
+        if (/s-no-results-heading|Nenhum resultado para/i.test(html)) return html;
       } catch {
         // próximo método
       }
     }
   }
-  if (paginaDeBusca(ultima)) return ultima;
+  if (melhorOfertas > 0 || paginaDeBusca(melhorHtml)) return melhorHtml;
   throw new Error("A busca de preços não respondeu agora.");
 }
 
@@ -363,7 +400,13 @@ function collectCookies(headers: Headers) {
 }
 
 function parseBRL(value: string) {
-  const number = Number(value.replace(/[^\d,]/g, "").replace(/\./g, "").replace(",", "."));
+  const number = Number(
+    value
+      .replace(/[\u00a0\u202f]/g, " ")
+      .replace(/[^\d,]/g, "")
+      .replace(/\./g, "")
+      .replace(",", "."),
+  );
   if (!Number.isFinite(number) || number <= 0 || number > 20000) return null;
   return Math.round(number * 100) / 100;
 }
