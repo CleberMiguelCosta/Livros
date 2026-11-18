@@ -323,13 +323,15 @@ function http1Json(url: string | URL, headers: Record<string, string>) {
 
 function requestHttp1(url: string | URL, headers: Record<string, string>, redirects: number) {
   return new Promise<{ status: number; text: string }>((resolve, reject) => {
+    // ALPNProtocols forces HTTP/1.1 (Open Library resets HTTP/2). Not on every @types/node RequestOptions shape.
+    const options = {
+      headers,
+      timeout: 15000,
+      ALPNProtocols: ["http/1.1"],
+    } as https.RequestOptions;
     const req = https.get(
       url,
-      {
-        headers,
-        timeout: 15000,
-        ALPNProtocols: ["http/1.1"],
-      },
+      options,
       (res) => {
         const status = res.statusCode ?? 0;
         const location = res.headers.location;
